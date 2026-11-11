@@ -1,6 +1,6 @@
 # Packliste
 
-Offline-Packliste zum **Personal Packing Manager**: https://maebx-cmd.github.io/packliste/
+Offline-Packliste zum **Personal Packing Manager**: https://maebx-cmd.github.io/Packliste/
 
 Die Seite enthält keine Daten. Die Sicherung (`PackingManager-Sicherung.json` aus der EXE oder der Web-App) wird nur
 lokal im Browser geöffnet. Danach geht offline: abhaken, Vor-Abreise-Liste bearbeiten, neue Reisen aus Modulen
