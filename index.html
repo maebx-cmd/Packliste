@@ -299,6 +299,20 @@ const PL = (() => {
       .sort((a, b) => ((a.reihenfolge || 0) - (b.reihenfolge || 0)) || (a.name || '').localeCompare(b.name || ''))
       .map(v => ({ id: `${reise.id}:aufg:${v.id}`, reise_id: reise.id, name: v.name, erledigt: false, vorlage: v.id }));
   }
+  const APP_KAT = ['Reise & Flug', 'Navigation', 'Transport', 'Kommunikation', 'Bezahlen', 'Sprache', 'Wetter', 'Sicherheit', 'Arbeit', 'Sonstiges'];
+  function appsFuer(reise, modulIds, apps) {
+    const gew = new Set(modulIds), aus = new Set(reise.apps_ausgeschlossen || []);
+    const cmp = (a, b) => a < b ? -1 : a > b ? 1 : 0;
+    return [...apps].filter(a => !a.geloescht && a.aktiv !== false && !aus.has(a.id) && (!(a.module || []).length || a.module.some(m => gew.has(m))))
+      .sort((a, b) => ((a.reihenfolge || 0) - (b.reihenfolge || 0)) || cmp((a.name || '').toLowerCase(), (b.name || '').toLowerCase()))
+      .map(a => ({ id: `${reise.id}:app:${a.id}`, reise_id: reise.id, app_id: a.id, name: a.name || '', kategorie: a.kategorie || 'Sonstiges',
+        zweck: a.zweck || '', link: a.link || '', eigen: false }));
+  }
+  function appsSortieren(as) {
+    const cmp = (a, b) => a < b ? -1 : a > b ? 1 : 0;
+    return [...as].sort((a, b) => { const ra = katRang(a.kategorie || 'Sonstiges', APP_KAT), rb = katRang(b.kategorie || 'Sonstiges', APP_KAT);
+      return (ra[0] - rb[0]) || cmp(ra[1], rb[1]) || cmp((a.name || '').toLowerCase(), (b.name || '').toLowerCase()); });
+  }
   function fortschritt(ps, gepaeck) {
     const a = ps.filter(p => !p.geloescht), n = a.length, gep = a.filter(p => p.gepackt).length;
     const je = {}; let gw = 0;
@@ -331,7 +345,7 @@ const PL = (() => {
     return erg;
   }
   const jetzt = () => new Date().toISOString().replace('Z', '+00:00');
-  return { KAT_STANDARD, PRIO, reisetage, moduleAufloesen, mengeBerechnen, sortiere, packlisteErzeugen, aufgabenFuer,
+  return { KAT_STANDARD, APP_KAT, PRIO, appsFuer, appsSortieren, reisetage, moduleAufloesen, mengeBerechnen, sortiere, packlisteErzeugen, aufgabenFuer,
     fortschritt, zusammenfuehren, jetzt };
 })();
 if (typeof module !== 'undefined') module.exports = PL;
@@ -452,9 +466,9 @@ function pReise(rid, tab) {
     <span class="badge ${f.prozent === 100 ? 'ok' : 'draft'}">${f.gepackt}/${f.anzahl}</span><span class="grow"></span>
     <button class="btn" onclick="window.print()">Drucken / PDF</button></div>
     <div class="sub2">${esc(r.ziel || '')}${r.abreise ? ' · ' + de(r.abreise) + ' – ' + de(r.rueckreise) : ''} · ${PL.reisetage(r.abreise, r.rueckreise, r.tage || 1)} Tage</div>
-    ${msgHtml()}<div class="tabs">${T('liste', 'Packliste')}${T('aufgaben', 'Vor Abreise')}${T('gepaeck', 'Gepäck')}</div></div>
-  <div class="content">${tab === 'aufgaben' ? tAufgaben(r) : tab === 'gepaeck' ? tGepaeck(r, ps, f) : tListe(r, ps, f)}</div>
-  ${druck(r, ps, f)}`;
+    ${msgHtml()}<div class="tabs">${T('liste', 'Packliste')}${T('aufgaben', 'Vor Abreise')}${T('apps', 'Apps')}${T('gepaeck', 'Gepäck')}</div></div>
+  <div class="content">${tab === 'aufgaben' ? tAufgaben(r) : tab === 'apps' ? tApps(r) : tab === 'gepaeck' ? tGepaeck(r, ps, f) : tListe(r, ps, f)}</div>
+  ${tab === 'apps' ? druckApps(r) : druck(r, ps, f)}`;
 }
 
 function tListe(r, ps, f) {
@@ -529,6 +543,59 @@ function aufgSet(aid, f) { schreibe('aufgabe', { ...get('aufgabe', aid), ...f })
 function aufgText(aid) { const t = $('#a_edit').value.trim(); if (t) aufgSet(aid, { name: t }); UI.aufgEdit = null; render(); }
 function aufgNeu(rid) { const t = $('#a_neu').value.trim(); if (!t) return; schreibe('aufgabe', { id: uid(), reise_id: rid, name: t, erledigt: false }); render(); }
 
+function tApps(r) {
+  const as = PL.appsSortieren(aktiv('reiseapp').filter(a => a.reise_id === r.id));
+  const inst = as.filter(a => a.installiert).length, einr = as.filter(a => a.eingerichtet).length;
+  const gr = {}; as.forEach(a => (gr[a.kategorie || 'Sonstiges'] ||= []).push(a));
+  const kat = asDict('app'); const aus = (r.apps_ausgeschlossen || []).map(id => kat[id]).filter(Boolean);
+  return `<div class="card"><div class="kpis"><div class="kpi"><div class="l">Installiert</div><div class="v">${inst} / ${as.length}</div>
+    <div class="bar" style="width:120px"><i style="width:${as.length ? inst / as.length * 100 : 0}%"></i></div></div>
+    <div class="kpi"><div class="l">Eingerichtet</div><div class="v">${einr} / ${as.length}</div></div></div>
+    <p class="muted" style="margin:10px 0 0">Haken = installiert. Antippen für Notiz und „eingerichtet". Drucken erzeugt hier den App-Bericht.</p></div>
+  ${Object.entries(gr).map(([k, arr]) => `<div class="kat">${esc(k)} <small>${arr.filter(a => a.installiert).length}/${arr.length}</small></div>
+    <div class="pl">${arr.map(a => appZeile(a)).join('')}</div>`).join('') || '<div class="empty">Keine Apps für diese Reise.</div>'}
+  <div class="card" style="margin-top:16px"><div class="h2">Eigene App</div><div class="form">
+    <label>Name<input type="text" id="ea_name" placeholder="z. B. Agoda"></label><label class="span2">Zweck<input type="text" id="ea_zweck"></label></div>
+    <div style="margin-top:10px"><button class="btn emph" onclick="appEigene('${r.id}')">Hinzufügen</button></div></div>
+  ${aus.length ? `<div class="card"><div class="h2">Für diese Reise entfernt</div><table class="t">${aus.map(a => `<tr><td>${esc(a.name)}</td><td class="r"><button class="btn flat" onclick="appAufnehmen('${r.id}','${a.id}')">Wieder aufnehmen</button></td></tr>`).join('')}</table></div>` : ''}`;
+}
+function appZeile(a) {
+  const z2 = [a.zweck, a.eingerichtet ? 'eingerichtet' : '', a.notiz].filter(Boolean).join(' · ');
+  const link = a.link ? `<a class="btn flat" href="${esc(a.link)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">Öffnen</a>` : '';
+  const edit = UI.offen === a.id ? `<div class="pedit"><div class="form"><label class="span3">Notiz<input type="text" value="${esc(a.notiz || '')}" onchange="appSet('${a.id}',{notiz:this.value})"></label></div>
+    <div style="display:flex;gap:12px;margin-top:10px;align-items:center;flex-wrap:wrap"><label class="chk"><input type="checkbox" ${a.eingerichtet ? 'checked' : ''} onchange="appSet('${a.id}',{eingerichtet:this.checked})">eingerichtet</label>
+    <span style="flex:1"></span><button class="btn flat neg" onclick="appWeg('${a.id}')">Entfernen</button></div></div>` : '';
+  return `<div class="pi ${a.installiert && a.eingerichtet ? 'done' : ''}"><input type="checkbox" ${a.installiert ? 'checked' : ''} onchange="appSet('${a.id}',{installiert:this.checked})">
+    <div class="n" onclick="UI.offen=UI.offen==='${a.id}'?null:'${a.id}';render()"><span><b>${esc(a.name)}</b></span><div class="z2">${esc(z2)}</div></div>${link}</div>${edit}`;
+}
+function appSet(id, f) { schreibe('reiseapp', { ...get('reiseapp', id), ...f }); render(); }
+function appWeg(id) {
+  const a = get('reiseapp', id);
+  if (a.app_id && !a.eigen) { const r = get('reise', a.reise_id), aus = [...(r.apps_ausgeschlossen || [])];
+    if (!aus.includes(a.app_id)) schreibe('reise', { ...r, apps_ausgeschlossen: [...aus, a.app_id] }); }
+  loesche('reiseapp', id); UI.offen = null; render(); meldung('Entfernt – unten wieder aufnehmbar.', 'info');
+}
+function appAufnehmen(rid, appId) {
+  const r = get('reise', rid); schreibe('reise', { ...r, apps_ausgeschlossen: (r.apps_ausgeschlossen || []).filter(x => x !== appId) });
+  const id = `${rid}:app:${appId}`, alt = get('reiseapp', id), k = get('app', appId);
+  schreibe('reiseapp', { installiert: false, eingerichtet: false, notiz: '', ...(alt || {}), id, reise_id: rid, app_id: appId, name: k.name,
+    kategorie: k.kategorie || 'Sonstiges', zweck: k.zweck || '', link: k.link || '', eigen: false, geloescht: false });
+  render();
+}
+function appEigene(rid) {
+  const name = $('#ea_name').value.trim(); if (!name) return meldung('Name fehlt.', 'error');
+  schreibe('reiseapp', { id: uid(), reise_id: rid, app_id: null, name, kategorie: 'Sonstiges', zweck: $('#ea_zweck').value.trim(), link: '',
+    installiert: false, eingerichtet: false, notiz: '', eigen: true });
+  render(); meldung(`„${name}“ hinzugefügt.`, 'ok');
+}
+function druckApps(r) {
+  const as = PL.appsSortieren(aktiv('reiseapp').filter(a => a.reise_id === r.id));
+  const gr = {}; as.forEach(a => (gr[a.kategorie || 'Sonstiges'] ||= []).push(a));
+  return `<div class="druck"><div class="dkopf"><div><b>${esc(r.name)}</b><br>${esc(r.ziel || '')}</div><div class="dtitel">Apps für die Reise<br><small>${as.filter(a => a.installiert).length}/${as.length} installiert · ${as.filter(a => a.eingerichtet).length}/${as.length} eingerichtet</small></div></div>
+  ${Object.entries(gr).map(([k, arr]) => `<div class="dgruppe"><div class="dkat">${esc(k)}</div>${arr.map(a => `<div class="dz"><span class="box">${a.installiert ? '✓' : ''}</span>
+    <span><span class="b">${esc(a.name)}</span>${a.zweck ? ` <span class="dm" style="margin:0">· ${esc(a.zweck)}</span>` : ''}${a.notiz ? ` <span class="dm" style="margin:0">· ${esc(a.notiz)}</span>` : ''}</span>
+    <span class="dm">eingerichtet</span><span class="box">${a.eingerichtet ? '✓' : ''}</span></div>`).join('')}</div>`).join('')}</div>`;
+}
 function tGepaeck(r, ps, f) {
   return `<div class="card"><table class="t"><tr><th>Gepäckstück</th><th class="r">Positionen</th><th class="r">Gewicht</th><th class="r">Limit</th></tr>
     ${f.gepaeck.map(g => `<tr><td>${esc(g.name)}</td><td class="r">${ps.filter(p => p.gepaeck === g.id).length}</td>
@@ -569,8 +636,9 @@ function neueReise() {
   const e = PL.packlisteErzeugen(r, asDict('gegenstand'), asDict('modul'), katReihe());
   e.positionen.forEach(p => schreibe('position', { ...p, gepackt: false, gepaeck: null, notiz: '', besorgen: false, menge_manuell: false }));
   PL.aufgabenFuer(r, e.modul_ids, aktiv('aufgabenvorlage')).forEach(a => schreibe('aufgabe', a));
+  PL.appsFuer(r, e.modul_ids, aktiv('app')).forEach(a => schreibe('reiseapp', { ...a, installiert: false, eingerichtet: false, notiz: '' }));
   location.hash = `#/r/${r.id}/liste`;
-  setTimeout(() => meldung(`${e.positionen.length} Positionen aus ${e.module.length} Modulen (${e.module.join(', ')}); ${e.dubletten} Dubletten zusammengeführt.`, 'ok'));
+  setTimeout(() => meldung(`${e.positionen.length} Positionen aus ${e.module.length} Modulen (${e.module.join(', ')}); ${e.dubletten} Dubletten zusammengeführt; Apps im Reiter „Apps".`, 'ok'));
 }
 
 function pDaten() {
