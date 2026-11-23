@@ -308,9 +308,10 @@ const PL = (() => {
       .map(a => ({ id: `${reise.id}:app:${a.id}`, reise_id: reise.id, app_id: a.id, name: a.name || '', kategorie: a.kategorie || 'Sonstiges',
         zweck: a.zweck || '', link: a.link || '', eigen: false }));
   }
-  function appsSortieren(as) {
+  function appsSortieren(as, reihe) {
+    const r = reihe && reihe.length ? reihe : APP_KAT;
     const cmp = (a, b) => a < b ? -1 : a > b ? 1 : 0;
-    return [...as].sort((a, b) => { const ra = katRang(a.kategorie || 'Sonstiges', APP_KAT), rb = katRang(b.kategorie || 'Sonstiges', APP_KAT);
+    return [...as].sort((a, b) => { const ra = katRang(a.kategorie || 'Sonstiges', r), rb = katRang(b.kategorie || 'Sonstiges', r);
       return (ra[0] - rb[0]) || cmp(ra[1], rb[1]) || cmp((a.name || '').toLowerCase(), (b.name || '').toLowerCase()); });
   }
   function fortschritt(ps, gepaeck) {
@@ -377,7 +378,7 @@ const alle = typ => (S?.objekte?.[typ] || []);
 const aktiv = typ => alle(typ).filter(o => !o.geloescht);
 const get = (typ, id) => alle(typ).find(o => o.id === id);
 const asDict = typ => Object.fromEntries(aktiv(typ).map(o => [o.id, o]));
-const katReihe = () => aktiv('kategorie').sort((a, b) => (a.reihenfolge || 0) - (b.reihenfolge || 0)).map(k => k.name);
+const katReihe = (art = 'kategorie') => aktiv(art).sort((a, b) => (a.reihenfolge || 0) - (b.reihenfolge || 0)).map(k => k.name);
 function schreibe(typ, obj) {
   const liste = (S.objekte[typ] ||= []);
   obj.geaendert = PL.jetzt();
@@ -544,7 +545,7 @@ function aufgText(aid) { const t = $('#a_edit').value.trim(); if (t) aufgSet(aid
 function aufgNeu(rid) { const t = $('#a_neu').value.trim(); if (!t) return; schreibe('aufgabe', { id: uid(), reise_id: rid, name: t, erledigt: false }); render(); }
 
 function tApps(r) {
-  const as = PL.appsSortieren(aktiv('reiseapp').filter(a => a.reise_id === r.id));
+  const as = PL.appsSortieren(aktiv('reiseapp').filter(a => a.reise_id === r.id), katReihe('appkategorie'));
   const inst = as.filter(a => a.installiert).length, einr = as.filter(a => a.eingerichtet).length;
   const gr = {}; as.forEach(a => (gr[a.kategorie || 'Sonstiges'] ||= []).push(a));
   const kat = asDict('app'); const aus = (r.apps_ausgeschlossen || []).map(id => kat[id]).filter(Boolean);
@@ -589,7 +590,7 @@ function appEigene(rid) {
   render(); meldung(`„${name}“ hinzugefügt.`, 'ok');
 }
 function druckApps(r) {
-  const as = PL.appsSortieren(aktiv('reiseapp').filter(a => a.reise_id === r.id));
+  const as = PL.appsSortieren(aktiv('reiseapp').filter(a => a.reise_id === r.id), katReihe('appkategorie'));
   const gr = {}; as.forEach(a => (gr[a.kategorie || 'Sonstiges'] ||= []).push(a));
   return `<div class="druck"><div class="dkopf"><div><b>${esc(r.name)}</b><br>${esc(r.ziel || '')}</div><div class="dtitel">Apps für die Reise<br><small>${as.filter(a => a.installiert).length}/${as.length} installiert · ${as.filter(a => a.eingerichtet).length}/${as.length} eingerichtet</small></div></div>
   ${Object.entries(gr).map(([k, arr]) => `<div class="dgruppe"><div class="dkat">${esc(k)}</div>${arr.map(a => `<div class="dz"><span class="box">${a.installiert ? '✓' : ''}</span>
