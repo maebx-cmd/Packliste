@@ -1,86 +1,125 @@
 <!DOCTYPE html>
-<html lang="de">
-<head>
+<html lang="de"><head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#000084">
 <title>Termine</title>
 <script src="https://cdn.jsdelivr.net/npm/ical.js@1.5.0/build/ical.min.js"></script>
 <style>
-  /* ===== Einstellungen ===== */
-  :root{
-    --bg:#0b2b55; --bg-row:#0e3366; --bg-head:#061d3d; --band:#14417d;
-    --text:#ffffff; --muted:#9fb6d6; --yellow:#ffd400; --red:#e2002a;
-    --row-h:6.2vh; --font:"Frutiger","Segoe UI","Helvetica Neue",Arial,sans-serif;
+  /* Termintafel im Stil der ÖBB-Infra-Abfahrtstafel (wie die IVB-Monitore im Kochstrasse-Repo) */
+  :root { --navy:#000084; --blau:#0000cd; --gelb:#ffe600; --weiss:#ffffff; }
+  * { box-sizing:border-box; margin:0; padding:0; }
+  [hidden] { display:none !important; }
+  html, body { background:var(--navy); height:100%; }
+  body { color:var(--weiss); font-family:Arial, "Helvetica Neue", Helvetica, sans-serif; overflow:hidden;
+         padding:env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+         -webkit-text-size-adjust:100%; display:flex; flex-direction:column; }
+
+  /* Kopf: Piktogramm · Termine · Appointments · Uhr · Logo */
+  .kopf { position:relative; height:112px; overflow:hidden; flex-shrink:0; }
+  .zeile { position:absolute; left:2px; top:12px; display:flex; align-items:baseline; font-size:16.5px; line-height:1; white-space:nowrap; }
+  .pikto { display:block; width:15px; height:15px; align-self:center; margin-right:6px; }
+  .zeile .de { color:var(--gelb); width:82px; }
+  .zeile .en { color:var(--gelb); font-style:italic; width:108px; }
+  .zeile .uhr { font-variant-numeric:tabular-nums; }
+  .logo { position:absolute; right:10px; top:6px; text-align:right; }
+  .logo .marke { display:block; height:34px; width:auto; margin-left:auto; }
+  .logo .sub { font-size:13px; font-weight:700; letter-spacing:.14em; margin-top:6px; text-transform:uppercase; white-space:nowrap; }
+
+  /* Tabelle */
+  .tafel { flex:1; overflow:hidden; }
+  table { width:100%; border-collapse:collapse; table-layout:fixed; }
+  col.c-zeit { width:13.5%; } col.c-bis { width:14%; } col.c-art { width:13%; }
+  col.c-was { width:33%; } col.c-ort { width:15.5%; } col.c-in { width:11%; }
+  th { overflow:hidden; white-space:nowrap; text-align:left; font-weight:400; font-size:11px; padding:12px 0 10px 8px; vertical-align:top; line-height:1.15; }
+  th i { display:block; margin-top:14px; }
+  th.r { text-align:right; padding:12px 10px 10px 0; }
+  td { padding:0 0 0 8px; height:46px; font-size:14.5px; vertical-align:middle; white-space:nowrap; overflow:hidden; }
+  tbody tr.e td { background:var(--navy); }
+  tbody tr.e.hell td { background:var(--blau); }
+  .zeit, .bis, .in { font-variant-numeric:tabular-nums; }
+  .bis { color:var(--gelb); }
+  .art { overflow:visible; }
+  .badge { display:inline-block; min-width:30px; padding:1px 4px; text-align:center; font-weight:700; font-size:13px;
+           background:var(--weiss); color:#e30613; vertical-align:middle; line-height:1.25; }
+  .badge.unt { color:#0000cd; } .badge.hak { color:#000; }
+  .was { padding-left:4px; }
+  .ort { padding-left:4px; }
+  .in { text-align:right; padding-right:10px; }
+  tr.jetzt .zeit, tr.jetzt .in { color:var(--gelb); }
+  .ganz { font-size:.7em; }
+  td.zeit { overflow:visible; }
+
+  /* Tagesüberschrift wie die gelbe Kopfzeile */
+  tr.tag td { height:34px; background:var(--navy); color:var(--gelb); font-size:14.5px; padding-top:6px; }
+  tr.tag td i { margin-left:14px; }
+  tr.tag td span { color:var(--weiss); margin-left:14px; }
+  tr.leer td, tr.mehr td { height:34px; font-size:13px; opacity:.75; }
+
+  /* LED-Lauftext wie im Original: was nicht passt, läuft von rechts nach links durch */
+  .lz { display:block; overflow:hidden; white-space:nowrap; }
+  .lz > .t { display:inline-block; }
+  .lz.lauf > .t { animation:lauf var(--d, 8s) linear infinite; will-change:transform; }
+  @keyframes lauf { from { transform:translateX(var(--w, 100px)); } to { transform:translateX(-100%); } }
+
+  .fehler { padding:8px 12px; color:var(--gelb); font-size:13px; line-height:1.4; flex-shrink:0; }
+  .stand { padding:8px 12px 14px; font-size:11px; opacity:.55; display:flex; justify-content:space-between; flex-shrink:0; }
+
+  /* Breitere Bildschirme: alles etwas größer, wie auf dem Monitor */
+  @media (min-width:700px) {
+    .kopf { height:150px; } .zeile { font-size:30px; } .zeile .de { width:150px; } .zeile .en { width:210px; } .pikto { width:26px; height:26px; }
+    .logo .marke { height:84px; } .logo .sub { font-size:20px; margin-top:10px; }
+    th { font-size:15px; } td { font-size:22px; height:64px; } .badge { font-size:19px; min-width:44px; }
+    tr.tag td { font-size:24px; height:52px; } tr.leer td, tr.mehr td { font-size:18px; height:44px; }
+    .fehler { font-size:18px; } .stand { font-size:14px; }
   }
-  *{box-sizing:border-box;margin:0;padding:0}
-  html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--font);overflow:hidden;cursor:none}
-  body{display:flex;flex-direction:column}
-
-  header{display:flex;align-items:center;justify-content:space-between;
-    background:var(--bg-head);padding:1.6vh 2.4vw;border-bottom:.5vh solid var(--red)}
-  .title{display:flex;align-items:baseline;gap:1.4vw}
-  .title h1{font-size:6vh;font-weight:700;letter-spacing:.02em}
-  .title span{font-size:3.4vh;color:var(--muted);font-style:italic}
-  .clock{text-align:right;line-height:1}
-  .clock .time{font-size:6.4vh;font-weight:700;font-variant-numeric:tabular-nums}
-  .clock .time small{font-size:3.6vh;color:var(--muted);margin-left:.4vw}
-  .clock .date{font-size:2.6vh;color:var(--muted);margin-top:.6vh}
-
-  .cols,.row{display:grid;grid-template-columns:9vw 9vw 8vw 1fr 20vw 9vw;align-items:center;column-gap:1.6vw;padding:0 2.4vw}
-  .cols{background:var(--bg-head);height:4.6vh;font-size:2.2vh;color:var(--muted)}
-  .cols div b{color:var(--text);font-weight:600;margin-right:.4vw}
-  .cols .r{text-align:right}
-
-  main{flex:1;overflow:hidden;position:relative}
-  .band{display:flex;align-items:baseline;gap:1vw;background:var(--band);height:5.4vh;padding:0 2.4vw;font-size:3vh;font-weight:700}
-  .band span{font-weight:400;color:var(--muted);font-size:2.6vh}
-  .row{height:var(--row-h);font-size:3.6vh;border-bottom:.15vh solid rgba(255,255,255,.08)}
-  .row:nth-child(even){background:var(--bg-row)}
-  .row .t{font-weight:700;font-variant-numeric:tabular-nums}
-  .row .bis{color:var(--muted);font-variant-numeric:tabular-nums;font-size:3.4vh}
-  .row .loc{color:var(--muted);font-size:3.2vh}
-  .row .in{text-align:right;font-weight:700;font-variant-numeric:tabular-nums}
-  .row.now .t,.row.now .in{color:var(--yellow)}
-  .row.allday .t{font-size:2.8vh;font-weight:600;color:var(--muted)}
-  .badge{justify-self:start;font-size:2.4vh;font-weight:700;padding:.4vh .6vw;border-radius:.4vh;background:var(--c);color:#fff;letter-spacing:.04em}
-  .empty{padding:1.6vh 2.4vw;font-size:3.2vh;color:var(--muted);font-style:italic}
-  .more{padding:.8vh 2.4vw;font-size:2.6vh;color:var(--muted)}
-
-  /* Lauftext für zu lange Texte */
-  .clip{overflow:hidden;white-space:nowrap}
-  .clip > span{display:inline-block}
-  .clip.scroll > span{animation:lauf var(--dur) linear infinite}
-  @keyframes lauf{0%,12%{transform:translateX(0)}88%,100%{transform:translateX(var(--shift))}}
-
-  footer{display:flex;justify-content:space-between;background:var(--bg-head);
-    padding:.9vh 2.4vw;font-size:2.2vh;color:var(--muted)}
-  footer .err{color:var(--yellow)}
-</style>
-</head>
+  /* Großer Screen / Fernseher */
+  @media (min-width:1400px) {
+    .kopf { height:190px; } .zeile { font-size:42px; top:20px; left:16px; } .zeile .de { width:220px; } .zeile .en { width:300px; } .pikto { width:36px; height:36px; margin-right:12px; }
+    .logo { right:20px; top:14px; } .logo .marke { height:110px; } .logo .sub { font-size:26px; }
+    th { font-size:20px; padding-left:16px; } th.r { padding-right:20px; }
+    td { font-size:30px; height:72px; padding-left:16px; } .in { padding-right:20px; } .badge { font-size:26px; min-width:70px; padding:2px 8px; }
+    tr.tag td { font-size:32px; height:70px; } tr.leer td, tr.mehr td { font-size:24px; height:56px; }
+    .stand { font-size:18px; padding:10px 20px 16px; }
+  }
+</style></head>
 <body>
-<header>
-  <div class="title"><h1>Termine</h1><span>Appointments</span></div>
-  <div class="clock"><div class="time" id="time">--:--</div><div class="date" id="date"></div></div>
-</header>
-<div class="cols">
-  <div><b>Zeit</b>Time</div><div><b>Bis</b>Until</div><div><b>Art</b>Type</div><div><b>Termin</b>Appointment</div>
-  <div><b>Ort</b>Location</div><div class="r"><b>in</b></div>
+<div class="kopf"><div class="zeile">
+  <svg class="pikto" viewBox="0 0 24 24" aria-hidden="true"><rect x="1" y="1" width="22" height="22" fill="#fff"/>
+    <path d="M6 6h12v12H6zM6 9.5h12M9 4v4M15 4v4" fill="none" stroke="#000084" stroke-width="2"/>
+    <rect x="8" y="12" width="3" height="3" fill="#000084"/></svg>
+  <div class="de">Termine</div>
+  <div class="en">Appointments</div>
+  <div class="uhr" id="uhr"></div></div>
+  <div class="logo"><img class="marke" src="oebb-logo-weiss.png" alt="ÖBB"><div class="sub">Kalender</div></div>
 </div>
-<main id="board"></main>
-<footer><div id="status">Lade Kalender …</div><div id="stand"></div></footer>
+
+<div class="tafel" id="tafel">
+<table>
+  <colgroup><col class="c-zeit"><col class="c-bis"><col class="c-art"><col class="c-was"><col class="c-ort"><col class="c-in"></colgroup>
+  <thead><tr>
+    <th>Zeit<i>time</i></th><th>Bis<i>until</i></th><th>Art<i>type</i></th>
+    <th>Termin<i>appointment</i></th><th>Ort<i>location</i></th><th class="r">in<i>in</i></th>
+  </tr></thead>
+  <tbody id="liste"></tbody>
+</table>
+</div>
+<div id="fehler" class="fehler" hidden></div>
+<div class="stand"><span>Privat · Stundenplan · HAK Innsbruck</span><span id="stand"></span></div>
 
 <script>
 /* ===== Konfiguration =====
    WORKER_URL: Adresse deines Cloudflare Workers (siehe worker.js).
-   Alternativ per URL: index.html?src=https://…&key=…  (wird im Browser gespeichert) */
+   Alternativ per URL: ?src=https://…&key=…  (wird im Browser gespeichert) */
 const WORKER_URL = "";
-const CALS = [                   // Name im Worker, Kürzel auf der Tafel, Farbe
-  {id:"privat",      tag:"PRIV", color:"#e2002a"},
-  {id:"stundenplan", tag:"UNT",  color:"#2f8f4e"},
-  {id:"schule",      tag:"HAK",  color:"#d97a00"},
+const CALS = [                    // Name im Worker, Kürzel auf der Tafel
+  {id:"privat",      tag:"PRIV", cls:"priv"},
+  {id:"stundenplan", tag:"UNT",  cls:"unt"},
+  {id:"schule",      tag:"HAK",  cls:"hak"},
 ];
-const REFRESH_MIN = 5;          // Kalender alle 5 Minuten neu laden
-const SHOW_ENDED = false;       // beendete Termine von heute ausblenden
+const REFRESH_MIN = 5;
 
 const qs = new URLSearchParams(location.search);
 for (const k of ["src","key"]) if (qs.get(k)) try{localStorage.setItem("termine_"+k, qs.get(k))}catch(e){}
@@ -89,18 +128,23 @@ const SRC = qs.get("src") || store("src") || WORKER_URL;
 const KEY = qs.get("key") || store("key") || "";
 
 const WT = ["Sonntag","Montag","Dienstag","Mittwoch","Donnerstag","Freitag","Samstag"];
+const WT_EN = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
 const MO = ["Jänner","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"];
 const pad = n => String(n).padStart(2,"0");
 const hm = d => pad(d.getHours())+":"+pad(d.getMinutes());
+const dm = d => pad(d.getDate())+"."+pad(d.getMonth()+1)+".";
 const dayStart = (d,off=0) => new Date(d.getFullYear(), d.getMonth(), d.getDate()+off);
-const longDate = d => `${WT[d.getDay()]}, ${d.getDate()}. ${MO[d.getMonth()]}`;
 const esc = s => String(s??"").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
 let events = [], cache = {}, lastOk = null, lastErr = "";
 
-/* ---------- Kalender laden & aufbereiten ---------- */
-async function load(){
-  if (!SRC){ lastErr = "Keine Worker-Adresse eingestellt (WORKER_URL oder ?src=)"; render(); return; }
+function uhr(){ document.getElementById("uhr").textContent =
+  new Date().toLocaleTimeString("de-AT", {hour:"2-digit", minute:"2-digit", second:"2-digit"}); }
+setInterval(uhr, 1000); uhr();
+
+/* ---------- Kalender laden ---------- */
+async function laden(){
+  if (!SRC){ lastErr = "Keine Worker-Adresse eingestellt (WORKER_URL oder ?src=)."; zeichnen(); return; }
   const res = await Promise.all(CALS.map(async cal => {
     const u = new URL(SRC); u.searchParams.set("cal", cal.id);
     if (KEY) u.searchParams.set("key", KEY);
@@ -112,14 +156,13 @@ async function load(){
   res.forEach((r,i) => { if (r.ok) cache[CALS[i].id] = r.v; else failed.push(r.cal.tag); });
   events = Object.values(cache).flat().sort((a,b) => (b.allDay - a.allDay) || (a.start - b.start));
   if (failed.length < CALS.length) lastOk = new Date();
-  lastErr = failed.length ? "Nicht erreichbar: "+failed.join(", ")+" – zeige letzten Stand" : "";
-  render();
+  lastErr = failed.length ? "Nicht erreichbar: "+failed.join(", ")+" – zeige letzten Stand." : "";
+  zeichnen();
 }
 
 function parseICS(text){
   const comp = new ICAL.Component(ICAL.parse(text));
   comp.getAllSubcomponents("vtimezone").forEach(tz => { try{ICAL.TimezoneService.register(tz)}catch(e){} });
-
   const now = new Date(), from = dayStart(now), to = dayStart(now,2);
   const masters = {}, orphans = [];
   const all = comp.getAllSubcomponents("vevent").map(v => new ICAL.Event(v));
@@ -129,14 +172,12 @@ function parseICS(text){
   const out = [];
   const add = (s, e, item) => {
     if ((item.component.getFirstPropertyValue("status")||"").toUpperCase() === "CANCELLED") return;
-    const allDay = s.isDate;
-    const start = s.toJSDate();
+    const allDay = s.isDate, start = s.toJSDate();
     let end = e ? e.toJSDate() : new Date(start.getTime() + (allDay ? 864e5 : 0));
     if (end < start) end = start;
     if (start < to && (end > from || (+end === +start && start >= from)))
       out.push({start, end, allDay, title: item.summary || "(ohne Titel)", loc: (item.location||"").split("\n")[0]});
   };
-
   for (const m of [...Object.values(masters), ...orphans]){
     if (m.isRecurring()){
       const it = m.iterator(); let next, n = 0;
@@ -147,100 +188,97 @@ function parseICS(text){
       }
     } else add(m.startDate, m.endDate, m);
   }
-  return out.sort((a,b) => (b.allDay - a.allDay) || (a.start - b.start));
+  return out;
 }
 
-/* ---------- Anzeige ---------- */
+/* ---------- Tafel zeichnen ---------- */
 function countdown(ev, now){
   if (ev.allDay) return "";
   if (ev.start <= now && ev.end > now) return "jetzt";
   const min = Math.round((ev.start - now)/60000);
   if (min < 0) return "";
   if (min < 60) return min+"'";
-  if (min < 600) return Math.floor(min/60)+" h "+pad(min%60);
+  if (min < 600) return Math.floor(min/60)+"h"+pad(min%60);
   return "";
 }
 
-function rowHTML(ev, day, now){
-  const running = !ev.allDay && ev.start <= now && ev.end > now;
-  let t, bis;
-  if (ev.allDay){ t = "ganztägig"; bis = ""; }
-  else{
-    t = ev.start < day ? "seit "+pad(ev.start.getDate())+"."+pad(ev.start.getMonth()+1)+"." : hm(ev.start);
-    const nextDay = dayStart(day,1);
-    bis = +ev.end === +ev.start ? "" : (ev.end > nextDay ? "→ "+pad(ev.end.getDate())+"."+pad(ev.end.getMonth()+1)+"." : hm(ev.end));
+function zeile(ev, day, now, heute, hell){
+  const laeuft = !ev.allDay && ev.start <= now && ev.end > now;
+  let zeit, bis = "";
+  if (ev.allDay) zeit = `<span class="ganz">ganztägig</span>`;
+  else {
+    zeit = ev.start < day ? dm(ev.start) : hm(ev.start);
+    if (+ev.end !== +ev.start) bis = ev.end > dayStart(day,1) ? dm(ev.end) : hm(ev.end);
   }
-  return `<div class="row${running?" now":""}${ev.allDay?" allday":""}">
-    <div class="t">${t}</div><div class="bis">${bis}</div>
-    <div class="badge" style="--c:${ev.cal.color}">${ev.cal.tag}</div>
-    <div class="clip"><span>${esc(ev.title)}</span></div>
-    <div class="clip loc"><span>${esc(ev.loc)}</span></div>
-    <div class="in">${day.getTime()===dayStart(now).getTime()?countdown(ev,now):""}</div></div>`;
+  return `<tr class="e${hell?" hell":""}${laeuft?" jetzt":""}">
+    <td class="zeit">${zeit}</td>
+    <td class="bis">${bis}</td>
+    <td class="art"><span class="badge ${ev.cal.cls}">${ev.cal.tag}</span></td>
+    <td class="was"><span class="lz"><span class="t">${esc(ev.title)}</span></span></td>
+    <td class="ort"><span class="lz"><span class="t">${esc(ev.loc)}</span></span></td>
+    <td class="in">${heute ? countdown(ev, now) : ""}</td></tr>`;
 }
 
-function render(){
-  const now = new Date(), board = document.getElementById("board");
+function zeichnen(){
+  const now = new Date();
   let html = "";
   [0,1].forEach(off => {
     const day = dayStart(now,off), next = dayStart(now,off+1);
     let list = events.filter(e => e.start < next && (e.end > day || (+e.end === +e.start && e.start >= day)));
-    if (off === 0 && !SHOW_ENDED) list = list.filter(e => e.allDay || e.end > now || (+e.end === +e.start && e.start >= now));
-    html += `<section data-day="${off}"><div class="band">${off?"Morgen":"Heute"} <span>${longDate(day)}</span></div>`;
-    html += list.length ? list.map(e => rowHTML(e, day, now)).join("")
-                        : `<div class="empty">${off?"Keine Termine":"Keine weiteren Termine heute"}</div>`;
-    html += `</section>`;
+    if (off === 0) list = list.filter(e => e.allDay || e.end > now || (+e.end === +e.start && e.start >= now));
+    html += `<tr class="tag" data-tag="${off}"><td colspan="6">${off?"Morgen":"Heute"}<i>${off?"tomorrow":"today"}</i><span>${WT[day.getDay()]}, ${day.getDate()}. ${MO[day.getMonth()]}</span></td></tr>`;
+    html += list.length ? list.map((e,i) => zeile(e, day, now, off === 0, i % 2 === 0)).join("")
+                        : `<tr class="leer"><td colspan="6">${off?"Keine Termine":"Keine weiteren Termine heute"}</td></tr>`;
   });
-  board.innerHTML = html;
-  fitBoard(board);
-  marquee();
+  const liste = document.getElementById("liste");
+  // Nur neu zeichnen, wenn sich etwas geändert hat – sonst springen die Lauftexte zurück
+  if (liste.dataset.html !== html){ liste.innerHTML = html; liste.dataset.html = html; einpassen(); lauftext(); }
 
-  document.getElementById("status").innerHTML = lastErr ? `<span class="err">${esc(lastErr)}</span>` : "Privat · Stundenplan · HAK Innsbruck";
-  document.getElementById("stand").textContent = lastOk ? "Stand "+hm(lastOk) : "";
+  const f = document.getElementById("fehler");
+  f.textContent = lastErr; f.hidden = !lastErr;
+  document.getElementById("stand").textContent = lastOk ? "Stand " +
+    lastOk.toLocaleTimeString("de-AT", {hour:"2-digit", minute:"2-digit", second:"2-digit"}) : "";
 }
 
-/* Wenn zu viele Termine: unten kürzen und "+n weitere" anzeigen */
-function fitBoard(board){
-  const secs = [...board.querySelectorAll("section")].reverse();
-  for (const sec of secs){
-    let hidden = 0;
-    while (board.scrollHeight > board.clientHeight + 1){
-      const rows = sec.querySelectorAll(".row");
+/* Wenn zu viele Termine: von unten kürzen und „+ n weitere“ zeigen (morgen zuerst, dann heute) */
+function einpassen(){
+  const tafel = document.getElementById("tafel"), liste = document.getElementById("liste");
+  const zuViel = () => tafel.scrollHeight > tafel.clientHeight + 1;
+  for (const off of [1,0]){
+    let weg = 0, mehr = null;
+    while (zuViel()){
+      const kopf = liste.querySelector(`tr.tag[data-tag="${off}"]`);
+      const rows = []; for (let r = kopf.nextElementSibling; r && !r.classList.contains("tag"); r = r.nextElementSibling) if (r.classList.contains("e")) rows.push(r);
       if (rows.length <= 1) break;
-      rows[rows.length-1].remove(); hidden++;
-      let m = sec.querySelector(".more");
-      if (!m){ m = document.createElement("div"); m.className = "more"; sec.appendChild(m); }
-      m.textContent = `+ ${hidden} weitere${hidden===1?"r Termin":" Termine"}`;
+      rows[rows.length-1].remove(); weg++;
+      if (!mehr){ mehr = document.createElement("tr"); mehr.className = "mehr"; rows[rows.length-2].after(mehr); }
+      mehr.innerHTML = `<td colspan="6">+ ${weg} weitere${weg===1?"r Termin":" Termine"}</td>`;
     }
-    if (board.scrollHeight <= board.clientHeight + 1) break;
+    if (!zuViel()) break;
   }
 }
 
-function marquee(){
-  document.querySelectorAll(".clip").forEach(c => {
-    const s = c.firstElementChild, over = s.scrollWidth - c.clientWidth;
-    if (over > 2){
-      c.classList.add("scroll");
-      c.style.setProperty("--shift", -over+"px");
-      c.style.setProperty("--dur", Math.max(6, over/40 + 4)+"s");
+// Lauftext nur dort, wo der Text nicht in die Zelle passt; Tempo ca. 45 px/s wie eine LED-Anzeige
+function lauftext(){
+  document.querySelectorAll(".lz").forEach(box => {
+    const t = box.firstElementChild;
+    box.classList.remove("lauf");
+    const w = box.clientWidth, tw = t.scrollWidth;
+    if (tw > w + 1){
+      box.style.setProperty("--w", w + "px");
+      box.style.setProperty("--d", ((w + tw) / 45).toFixed(1) + "s");
+      box.classList.add("lauf");
     }
   });
 }
-
-function tick(){
-  const n = new Date();
-  document.getElementById("time").innerHTML = hm(n)+`<small>${pad(n.getSeconds())}</small>`;
-  document.getElementById("date").textContent = longDate(n)+" "+n.getFullYear();
-}
+let rt; addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { document.getElementById("liste").dataset.html = ""; zeichnen(); }, 200); });
 
 /* Bildschirm wach halten (wo unterstützt) */
-async function wake(){ try{ await navigator.wakeLock?.request("screen"); }catch(e){} }
-document.addEventListener("visibilitychange", () => document.visibilityState==="visible" && wake());
+async function wach(){ try{ await navigator.wakeLock?.request("screen"); }catch(e){} }
+document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && wach());
 
-tick(); setInterval(tick, 1000);
-setInterval(render, 30000);                 // Countdown & Tageswechsel
-setInterval(load, REFRESH_MIN*60000);
-window.addEventListener("resize", render);
-wake(); load();
+wach(); laden();
+setInterval(zeichnen, 30000);              // Countdown & Tageswechsel
+setInterval(laden, REFRESH_MIN * 60000);
 </script>
-</body>
-</html>
+</body></html>
