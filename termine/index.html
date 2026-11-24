@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Termine</title>
+<script src="https://cdn.jsdelivr.net/npm/ical.js@1.5.0/build/ical.min.js"></script>
+<style>
+  /* ===== Einstellungen ===== */
+  :root{
+    --bg:#0b2b55; --bg-row:#0e3366; --bg-head:#061d3d; --band:#14417d;
+    --text:#ffffff; --muted:#9fb6d6; --yellow:#ffd400; --red:#e2002a;
+    --row-h:6.2vh; --font:"Frutiger","Segoe UI","Helvetica Neue",Arial,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--font);overflow:hidden;cursor:none}
+  body{display:flex;flex-direction:column}
+
+  header{display:flex;align-items:center;justify-content:space-between;
+    background:var(--bg-head);padding:1.6vh 2.4vw;border-bottom:.5vh solid var(--red)}
+  .title{display:flex;align-items:baseline;gap:1.4vw}
+  .title h1{font-size:6vh;font-weight:700;letter-spacing:.02em}
+  .title span{font-size:3.4vh;color:var(--muted);font-style:italic}
+  .clock{text-align:right;line-height:1}
+  .clock .time{font-size:6.4vh;font-weight:700;font-variant-numeric:tabular-nums}
+  .clock .time small{font-size:3.6vh;color:var(--muted);margin-left:.4vw}
+  .clock .date{font-size:2.6vh;color:var(--muted);margin-top:.6vh}
+
+  .cols,.row{display:grid;grid-template-columns:9vw 9vw 8vw 1fr 20vw 9vw;align-items:center;column-gap:1.6vw;padding:0 2.4vw}
+  .cols{background:var(--bg-head);height:4.6vh;font-size:2.2vh;color:var(--muted)}
+  .cols div b{color:var(--text);font-weight:600;margin-right:.4vw}
+  .cols .r{text-align:right}
+
+  main{flex:1;overflow:hidden;position:relative}
+  .band{display:flex;align-items:baseline;gap:1vw;background:var(--band);height:5.4vh;padding:0 2.4vw;font-size:3vh;font-weight:700}
+  .band span{font-weight:400;color:var(--muted);font-size:2.6vh}
+  .row{height:var(--row-h);font-size:3.6vh;border-bottom:.15vh solid rgba(255,255,255,.08)}
+  .row:nth-child(even){background:var(--bg-row)}
+  .row .t{font-weight:700;font-variant-numeric:tabular-nums}
+  .row .bis{color:var(--muted);font-variant-numeric:tabular-nums;font-size:3.4vh}
+  .row .loc{color:var(--muted);font-size:3.2vh}
+  .row .in{text-align:right;font-weight:700;font-variant-numeric:tabular-nums}
+  .row.now .t,.row.now .in{color:var(--yellow)}
+  .row.allday .t{font-size:2.8vh;font-weight:600;color:var(--muted)}
+  .badge{justify-self:start;font-size:2.4vh;font-weight:700;padding:.4vh .6vw;border-radius:.4vh;background:var(--c);color:#fff;letter-spacing:.04em}
+  .empty{padding:1.6vh 2.4vw;font-size:3.2vh;color:var(--muted);font-style:italic}
+  .more{padding:.8vh 2.4vw;font-size:2.6vh;color:var(--muted)}
+
+  /* Lauftext für zu lange Texte */
+  .clip{overflow:hidden;white-space:nowrap}
+  .clip > span{display:inline-block}
+  .clip.scroll > span{animation:lauf var(--dur) linear infinite}
+  @keyframes lauf{0%,12%{transform:translateX(0)}88%,100%{transform:translateX(var(--shift))}}
+
+  footer{display:flex;justify-content:space-between;background:var(--bg-head);
+    padding:.9vh 2.4vw;font-size:2.2vh;color:var(--muted)}
+  footer .err{color:var(--yellow)}
+</style>
+</head>
+<body>
+<header>
+  <div class="title"><h1>Termine</h1><span>Appointments</span></div>
+  <div class="clock"><div class="time" id="time">--:--</div><div class="date" id="date"></div></div>
+</header>
+<div class="cols">
+  <div><b>Zeit</b>Time</div><div><b>Bis</b>Until</div><div><b>Art</b>Type</div><div><b>Termin</b>Appointment</div>
+  <div><b>Ort</b>Location</div><div class="r"><b>in</b></div>
+</div>
+<main id="board"></main>
+<footer><div id="status">Lade Kalender …</div><div id="stand"></div></footer>
+
+<script>
+/* ===== Konfiguration =====
+   WORKER_URL: Adresse deines Cloudflare Workers (siehe worker.js).
+   Alternativ per URL: index.html?src=https://…&key=…  (wird im Browser gespeichert) */
+const WORKER_URL = "";
+const CALS = [                   // Name im Worker, Kürzel auf der Tafel, Farbe
+  {id:"privat",      tag:"PRIV", color:"#e2002a"},
+  {id:"stundenplan", tag:"UNT",  color:"#2f8f4e"},
+  {id:"schule",      tag:"HAK",  color:"#d97a00"},
+];
+const REFRESH_MIN = 5;          // Kalender alle 5 Minuten neu laden
+const SHOW_ENDED = false;       // beendete Termine von heute ausblenden
+
+const qs = new URLSearchParams(location.search);
+for (const k of ["src","key"]) if (qs.get(k)) try{localStorage.setItem("termine_"+k, qs.get(k))}catch(e){}
+const store = k => { try{return localStorage.getItem("termine_"+k)}catch(e){return null} };
+const SRC = qs.get("src") || store("src") || WORKER_URL;
+const KEY = qs.get("key") || store("key") || "";
+
+const WT = ["Sonntag","Montag","Dienstag","Mittwoch","Donnerstag","Freitag","Samstag"];
+const MO = ["Jänner","Februar","März","April","Mai","Juni","Juli","August","September","Oktober","November","Dezember"];
+const pad = n => String(n).padStart(2,"0");
+const hm = d => pad(d.getHours())+":"+pad(d.getMinutes());
+const dayStart = (d,off=0) => new Date(d.getFullYear(), d.getMonth(), d.getDate()+off);
+const longDate = d => `${WT[d.getDay()]}, ${d.getDate()}. ${MO[d.getMonth()]}`;
+const esc = s => String(s??"").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+let events = [], cache = {}, lastOk = null, lastErr = "";
+
+/* ---------- Kalender laden & aufbereiten ---------- */
+async function load(){
+  if (!SRC){ lastErr = "Keine Worker-Adresse eingestellt (WORKER_URL oder ?src=)"; render(); return; }
+  const res = await Promise.all(CALS.map(async cal => {
+    const u = new URL(SRC); u.searchParams.set("cal", cal.id);
+    if (KEY) u.searchParams.set("key", KEY);
+    const r = await fetch(u, {cache:"no-store"});
+    if (!r.ok) throw new Error("HTTP "+r.status);
+    return parseICS(await r.text()).map(e => ({...e, cal}));
+  }).map((p,i) => p.then(v => ({ok:true,v}), e => ({ok:false,e,cal:CALS[i]}))));
+  const failed = [];
+  res.forEach((r,i) => { if (r.ok) cache[CALS[i].id] = r.v; else failed.push(r.cal.tag); });
+  events = Object.values(cache).flat().sort((a,b) => (b.allDay - a.allDay) || (a.start - b.start));
+  if (failed.length < CALS.length) lastOk = new Date();
+  lastErr = failed.length ? "Nicht erreichbar: "+failed.join(", ")+" – zeige letzten Stand" : "";
+  render();
+}
+
+function parseICS(text){
+  const comp = new ICAL.Component(ICAL.parse(text));
+  comp.getAllSubcomponents("vtimezone").forEach(tz => { try{ICAL.TimezoneService.register(tz)}catch(e){} });
+
+  const now = new Date(), from = dayStart(now), to = dayStart(now,2);
+  const masters = {}, orphans = [];
+  const all = comp.getAllSubcomponents("vevent").map(v => new ICAL.Event(v));
+  all.filter(e => !e.isRecurrenceException()).forEach(e => masters[e.uid] = e);
+  all.filter(e => e.isRecurrenceException()).forEach(e => masters[e.uid] ? masters[e.uid].relateException(e) : orphans.push(e));
+
+  const out = [];
+  const add = (s, e, item) => {
+    if ((item.component.getFirstPropertyValue("status")||"").toUpperCase() === "CANCELLED") return;
+    const allDay = s.isDate;
+    const start = s.toJSDate();
+    let end = e ? e.toJSDate() : new Date(start.getTime() + (allDay ? 864e5 : 0));
+    if (end < start) end = start;
+    if (start < to && (end > from || (+end === +start && start >= from)))
+      out.push({start, end, allDay, title: item.summary || "(ohne Titel)", loc: (item.location||"").split("\n")[0]});
+  };
+
+  for (const m of [...Object.values(masters), ...orphans]){
+    if (m.isRecurring()){
+      const it = m.iterator(); let next, n = 0;
+      while ((next = it.next()) && n++ < 20000){
+        if (next.toJSDate() >= to) break;
+        const d = m.getOccurrenceDetails(next);
+        if (d.endDate.toJSDate() > from || d.startDate.toJSDate() >= from) add(d.startDate, d.endDate, d.item);
+      }
+    } else add(m.startDate, m.endDate, m);
+  }
+  return out.sort((a,b) => (b.allDay - a.allDay) || (a.start - b.start));
+}
+
+/* ---------- Anzeige ---------- */
+function countdown(ev, now){
+  if (ev.allDay) return "";
+  if (ev.start <= now && ev.end > now) return "jetzt";
+  const min = Math.round((ev.start - now)/60000);
+  if (min < 0) return "";
+  if (min < 60) return min+"'";
+  if (min < 600) return Math.floor(min/60)+" h "+pad(min%60);
+  return "";
+}
+
+function rowHTML(ev, day, now){
+  const running = !ev.allDay && ev.start <= now && ev.end > now;
+  let t, bis;
+  if (ev.allDay){ t = "ganztägig"; bis = ""; }
+  else{
+    t = ev.start < day ? "seit "+pad(ev.start.getDate())+"."+pad(ev.start.getMonth()+1)+"." : hm(ev.start);
+    const nextDay = dayStart(day,1);
+    bis = +ev.end === +ev.start ? "" : (ev.end > nextDay ? "→ "+pad(ev.end.getDate())+"."+pad(ev.end.getMonth()+1)+"." : hm(ev.end));
+  }
+  return `<div class="row${running?" now":""}${ev.allDay?" allday":""}">
+    <div class="t">${t}</div><div class="bis">${bis}</div>
+    <div class="badge" style="--c:${ev.cal.color}">${ev.cal.tag}</div>
+    <div class="clip"><span>${esc(ev.title)}</span></div>
+    <div class="clip loc"><span>${esc(ev.loc)}</span></div>
+    <div class="in">${day.getTime()===dayStart(now).getTime()?countdown(ev,now):""}</div></div>`;
+}
+
+function render(){
+  const now = new Date(), board = document.getElementById("board");
+  let html = "";
+  [0,1].forEach(off => {
+    const day = dayStart(now,off), next = dayStart(now,off+1);
+    let list = events.filter(e => e.start < next && (e.end > day || (+e.end === +e.start && e.start >= day)));
+    if (off === 0 && !SHOW_ENDED) list = list.filter(e => e.allDay || e.end > now || (+e.end === +e.start && e.start >= now));
+    html += `<section data-day="${off}"><div class="band">${off?"Morgen":"Heute"} <span>${longDate(day)}</span></div>`;
+    html += list.length ? list.map(e => rowHTML(e, day, now)).join("")
+                        : `<div class="empty">${off?"Keine Termine":"Keine weiteren Termine heute"}</div>`;
+    html += `</section>`;
+  });
+  board.innerHTML = html;
+  fitBoard(board);
+  marquee();
+
+  document.getElementById("status").innerHTML = lastErr ? `<span class="err">${esc(lastErr)}</span>` : "Privat · Stundenplan · HAK Innsbruck";
+  document.getElementById("stand").textContent = lastOk ? "Stand "+hm(lastOk) : "";
+}
+
+/* Wenn zu viele Termine: unten kürzen und "+n weitere" anzeigen */
+function fitBoard(board){
+  const secs = [...board.querySelectorAll("section")].reverse();
+  for (const sec of secs){
+    let hidden = 0;
+    while (board.scrollHeight > board.clientHeight + 1){
+      const rows = sec.querySelectorAll(".row");
+      if (rows.length <= 1) break;
+      rows[rows.length-1].remove(); hidden++;
+      let m = sec.querySelector(".more");
+      if (!m){ m = document.createElement("div"); m.className = "more"; sec.appendChild(m); }
+      m.textContent = `+ ${hidden} weitere${hidden===1?"r Termin":" Termine"}`;
+    }
+    if (board.scrollHeight <= board.clientHeight + 1) break;
+  }
+}
+
+function marquee(){
+  document.querySelectorAll(".clip").forEach(c => {
+    const s = c.firstElementChild, over = s.scrollWidth - c.clientWidth;
+    if (over > 2){
+      c.classList.add("scroll");
+      c.style.setProperty("--shift", -over+"px");
+      c.style.setProperty("--dur", Math.max(6, over/40 + 4)+"s");
+    }
+  });
+}
+
+function tick(){
+  const n = new Date();
+  document.getElementById("time").innerHTML = hm(n)+`<small>${pad(n.getSeconds())}</small>`;
+  document.getElementById("date").textContent = longDate(n)+" "+n.getFullYear();
+}
+
+/* Bildschirm wach halten (wo unterstützt) */
+async function wake(){ try{ await navigator.wakeLock?.request("screen"); }catch(e){} }
+document.addEventListener("visibilitychange", () => document.visibilityState==="visible" && wake());
+
+tick(); setInterval(tick, 1000);
+setInterval(render, 30000);                 // Countdown & Tageswechsel
+setInterval(load, REFRESH_MIN*60000);
+window.addEventListener("resize", render);
+wake(); load();
+</script>
+</body>
+</html>
